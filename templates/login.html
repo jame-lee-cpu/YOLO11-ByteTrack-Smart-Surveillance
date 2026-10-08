@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card narrow auth-card">
+  <h2>用户登录</h2>
+  <p class="hint">默认管理员账号：{{ admin_default }}</p>
+  <form method="post" class="form">
+    <label>用户名</label>
+    <input name="username" required>
+    <label>密码</label>
+    <input name="password" type="password" required>
+    <button type="submit">登录</button>
+  </form>
+  <p>还没有账号？<a href="{{ url_for('register') }}">去注册</a></p>
+</section>
+{% endblock %}

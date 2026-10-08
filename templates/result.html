@@ -1,0 +1,254 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h2>结果查看</h2>
+    <p class="hint">任务ID：{{ task['id'] }}，状态：{{ task['status'] }}</p>
+  </div>
+  <a class="btn-secondary" href="{{ url_for('dashboard') }}">返回控制台</a>
+</section>
+
+{% if task['status'] == 'failed' and task['error_message'] %}
+<section class="card">
+  <p class="err-text">失败原因：{{ task['error_message'] }}</p>
+</section>
+{% endif %}
+
+<section class="stats four">
+  <div class="stat"><span>总车流量</span><strong id="live-flow-total">{{ task['flow_total'] }}</strong></div>
+  <div class="stat"><span>平均估算车速</span><strong id="live-avg-speed">{{ '%.1f'|format(task['avg_speed_kmh'] or 0) }} km/h</strong></div>
+  <div class="stat"><span>最高估算车速</span><strong id="live-max-speed">{{ '%.1f'|format(task['max_speed_kmh'] or 0) }} km/h</strong></div>
+  <div class="stat"><span>已测速车辆数</span><strong id="live-measured-count">{{ task['measured_count'] }}</strong></div>
+</section>
+
+{% if task['status'] == 'running' %}
+<div class="page-grid">
+  <section class="card preview-card live-preview" id="preview-card">
+    <div class="preview-toolbar">
+      <h3>实时检测预览</h3>
+      <button class="btn-secondary btn-compact" type="button" id="toggle-preview-size">最大化</button>
+    </div>
+    <div class="video-box">
+      <img id="live-preview-img" class="selectable-preview" src="{{ url_for('video_feed', task_id=task['id']) }}" alt="实时预览">
+    </div>
+  </section>
+  <aside class="card">
+    <div class="runtime-controls">
+      <h3>运行时轨迹控制</h3>
+      <label for="runtime-trail-mode">轨迹模式</label>
+      <select id="runtime-trail-mode">
+        <option value="none" {% if task_config.trail_mode == 'none' %}selected{% endif %}>none</option>
+        <option value="all" {% if task_config.trail_mode == 'all' %}selected{% endif %}>all</option>
+        <option value="selected" {% if task_config.trail_mode == 'selected' %}selected{% endif %}>selected</option>
+      </select>
+      <label for="runtime-highlight-ids">高亮 track_id</label>
+      <input id="runtime-highlight-ids" type="text" value="{{ task_config.highlight_ids|join(',') }}" placeholder="12 或 12,15">
+      <label for="runtime-trail-len">轨迹长度</label>
+      <input id="runtime-trail-len" type="number" min="1" value="{{ task_config.trail_len }}">
+      <button class="btn-primary" type="button" id="apply-trail">应用轨迹设置</button>
+      <div class="button-grid two">
+        <button class="btn-secondary" type="button" id="pause-task">暂停分析</button>
+        <button class="btn-secondary" type="button" id="resume-task">继续分析</button>
+      </div>
+      <p class="hint" id="runtime-message">修改只影响后续帧，不回溯历史帧。</p>
+    </div>
+    <h3>当前参数摘要</h3>
+    <dl class="kv-list">
+      <div><dt>模型</dt><dd>{{ task_config.model_path }}</dd></div>
+      <div><dt>置信度</dt><dd>{{ '%.2f'|format(task_config.conf or 0) }}</dd></div>
+      <div><dt>轨迹模式</dt><dd>{{ task_config.trail_mode }}</dd></div>
+      <div><dt>测速线距离</dt><dd>{{ '%.1f'|format(task_config.line_distance_m or 0) }} m</dd></div>
+    </dl>
+  </aside>
+</div>
+<section class="card" id="live-rear-end-card" hidden>
+  <h3>追尾风险报告</h3>
+  <div id="live-rear-end-list"></div>
+</section>
+<script>
+  (function () {
+    const taskId = {{ task['id'] }};
+    const runtimeMsg = document.getElementById('runtime-message');
+    const previewCard = document.getElementById('preview-card');
+    const togglePreview = document.getElementById('toggle-preview-size');
+    const previewImg = document.getElementById('live-preview-img');
+    const rearEndCard = document.getElementById('live-rear-end-card');
+    const rearEndList = document.getElementById('live-rear-end-list');
+
+    function updateStats(stats) {
+      if (!stats) return;
+      document.getElementById('live-flow-total').textContent = String(stats.flow_total || 0);
+      document.getElementById('live-avg-speed').textContent = `${Number(stats.avg_speed_kmh || 0).toFixed(1)} km/h`;
+      document.getElementById('live-max-speed').textContent = `${Number(stats.max_speed_kmh || 0).toFixed(1)} km/h`;
+      document.getElementById('live-measured-count').textContent = String(stats.measured_count || 0);
+    }
+
+    function esc(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (ch) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+    }
+
+    function renderRearEndReviews(items, qwenActive = false) {
+      if (!rearEndCard || !rearEndList || !items || !items.length) return;
+      rearEndCard.hidden = false;
+      rearEndList.innerHTML = items.map((item) => {
+        const result = qwenActive ? String(item.qwen_result || '').toLowerCase() : '';
+        const hasError = qwenActive && Boolean(item.qwen_error);
+        const prefix = result === 'true'
+          ? '千问复核为 true'
+          : (result === 'false' ? '千问复核为 false' : (hasError ? '千问复核未完成' : '规则检测到疑似追尾风险'));
+        const title = `${prefix}：frame ${esc(item.frame_id || '')}，${Number(item.timestamp || 0).toFixed(2)}s，track ${esc(item.track_id || '')} / ${esc(item.related_track_id || '')}`;
+        const reason = esc(qwenActive
+          ? (item.qwen_reason || item.qwen_error || item.description || '')
+          : (item.description || item.qwen_reason || ''));
+        const snapshots = (item.downloads || []).map((file) => (
+          `<figure class="snapshot-item"><a href="${esc(file.url)}" target="_blank" rel="noopener"><img src="${esc(file.url)}" alt="${esc(file.label || '追尾风险截图')}"></a><figcaption>${esc(file.label || '')}${file.timestamp !== null && file.timestamp !== undefined ? `，${Number(file.timestamp).toFixed(2)}s` : ''}</figcaption></figure>`
+        )).join('');
+        return `<div class="alert-block"><p class="err-text">${title}</p><p class="hint">${reason}</p>${snapshots ? `<div class="snapshot-grid">${snapshots}</div>` : ''}</div>`;
+      }).join('');
+    }
+
+    PreviewSelection.bind(taskId, previewImg, runtimeMsg);
+    document.getElementById('apply-trail').addEventListener('click', () => TrailControl.apply(taskId, runtimeMsg));
+    document.getElementById('pause-task').addEventListener('click', () => TrailControl.pause(taskId, runtimeMsg));
+    document.getElementById('resume-task').addEventListener('click', () => TrailControl.resume(taskId, runtimeMsg));
+    togglePreview.addEventListener('click', () => UI.toggleMaximize(previewCard, togglePreview));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && previewCard.classList.contains('is-maximized')) {
+        previewCard.classList.remove('is-maximized');
+        togglePreview.textContent = '最大化';
+      }
+    });
+    const timer = setInterval(async () => {
+      try {
+        const data = await API.get(`/task_status/${taskId}`);
+        if (!data.ok) return;
+        updateStats(data.stats);
+        renderRearEndReviews(data.rear_end_reviews, Boolean(data.qwen_active));
+        if (data.status === 'done') {
+          clearInterval(timer);
+          window.location.href = data.result_url;
+        } else if (data.status === 'failed') {
+          clearInterval(timer);
+        }
+      } catch (_) {}
+    }, 2000);
+  })();
+</script>
+{% endif %}
+
+{% if task['status'] == 'done' %}
+{% if rear_end_reviews %}
+<section class="card">
+  <h3>追尾风险报告</h3>
+  {% for item in rear_end_reviews %}
+  <div class="alert-block">
+    {% set ds_result = (item.qwen_result if qwen_key_enabled else '')|string|lower %}
+    {% if ds_result == 'true' %}
+    <p class="err-text">千问复核为 true：frame {{ item.frame_id }}，{{ '%.2f'|format(item.timestamp|float) }}s，track {{ item.track_id }} / {{ item.related_track_id }}</p>
+    {% elif ds_result == 'false' %}
+    <p class="err-text">千问复核为 false：frame {{ item.frame_id }}，{{ '%.2f'|format(item.timestamp|float) }}s，track {{ item.track_id }} / {{ item.related_track_id }}</p>
+    {% elif qwen_key_enabled and item.qwen_error %}
+    <p class="err-text">千问复核未完成：frame {{ item.frame_id }}，{{ '%.2f'|format(item.timestamp|float) }}s，track {{ item.track_id }} / {{ item.related_track_id }}</p>
+    {% else %}
+    <p class="err-text">规则检测到疑似追尾风险：frame {{ item.frame_id }}，{{ '%.2f'|format(item.timestamp|float) }}s，track {{ item.track_id }} / {{ item.related_track_id }}</p>
+    {% endif %}
+    <p class="hint">
+      {% if qwen_key_enabled %}
+        {{ item.qwen_reason or item.qwen_error or item.description }}
+      {% else %}
+        {{ item.description or item.qwen_reason }}
+      {% endif %}
+    </p>
+    {% if item.downloads %}
+    <div class="snapshot-grid">
+      {% for file in item.downloads %}
+      <figure class="snapshot-item">
+        <a href="{{ file.url }}" target="_blank" rel="noopener">
+          <img src="{{ file.url }}" alt="{{ file.label }} 追尾风险截图">
+        </a>
+        <figcaption>{{ file.label }}{% if file.timestamp is not none %}，{{ '%.2f'|format(file.timestamp) }}s{% endif %}</figcaption>
+      </figure>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+{% elif qwen_key_enabled %}
+<section class="card">
+  <h3>追尾风险报告</h3>
+  <p class="hint">千问未确认追尾风险事件。</p>
+</section>
+{% endif %}
+
+<section class="card">
+  <h3>分析结果视频</h3>
+  {% if files.output %}
+  <div class="video-box">
+    <video controls preload="metadata">
+      <source src="{{ url_for('media_file', task_id=task['id'], file_key='output') }}" type="video/mp4">
+      浏览器不支持视频播放，请下载文件查看。
+    </video>
+  </div>
+  {% else %}
+  <p class="hint">结果视频未生成。</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h3>监控数据综合统计图</h3>
+  {% if files.report %}
+  <div class="center-wrap">
+    <img src="{{ url_for('media_file', task_id=task['id'], file_key='report') }}" alt="监控数据综合统计图" class="report-img report-centered">
+  </div>
+  {% else %}
+  <p class="hint">综合统计图未生成。</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h3>文件下载区域</h3>
+  <div class="download-grid">
+    {% if files.input %}<a class="btn-link" href="{{ url_for('download_file', task_id=task['id'], file_key='input') }}">下载 原始视频</a>{% else %}<span class="btn-disabled">原始视频</span>{% endif %}
+    {% if files.output %}<a class="btn-link" href="{{ url_for('download_file', task_id=task['id'], file_key='output') }}">下载 标注结果视频</a>{% else %}<span class="btn-disabled">标注结果视频</span>{% endif %}
+    {% if files.report %}<a class="btn-link" href="{{ url_for('download_file', task_id=task['id'], file_key='report') }}">下载 综合统计图</a>{% else %}<span class="btn-disabled">综合统计图</span>{% endif %}
+    {% if files.anomalies %}<a class="btn-link" href="{{ url_for('download_file', task_id=task['id'], file_key='anomalies') }}">下载 追尾风险记录表</a>{% else %}<span class="btn-disabled">追尾风险记录表</span>{% endif %}
+    {% if files.counts %}<a class="btn-link" href="{{ url_for('download_file', task_id=task['id'], file_key='counts') }}">下载 车流统计表</a>{% else %}<span class="btn-disabled">车流统计表</span>{% endif %}
+    {% if files.tracks %}<a class="btn-link" href="{{ url_for('download_file', task_id=task['id'], file_key='tracks') }}">下载 轨迹记录表</a>{% else %}<span class="btn-disabled">轨迹记录表</span>{% endif %}
+    {% if files.traffic %}<a class="btn-link" href="{{ url_for('download_file', task_id=task['id'], file_key='traffic') }}">下载 测速明细表</a>{% else %}<span class="btn-disabled">测速明细表</span>{% endif %}
+    {% if files.events %}<a class="btn-link" href="{{ url_for('download_file', task_id=task['id'], file_key='events') }}">下载 测速事件表</a>{% else %}<span class="btn-disabled">测速事件表</span>{% endif %}
+  </div>
+</section>
+
+<section class="card">
+  <h3>轨迹分析摘要（前5）</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>track_id</th>
+        <th>类别</th>
+        <th>总长度(px)</th>
+        <th>方向</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in traj_summary['top_tracks'] %}
+      <tr>
+        <td>{{ r['track_id'] }}</td>
+        <td>{{ r['class_name'] }}</td>
+        <td>{{ '%.1f'|format(r['total_length'] or 0) }}</td>
+        <td>{{ r['direction'] }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">暂无轨迹摘要</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% elif task['status'] != 'running' %}
+<section class="card">
+  <p class="hint">任务尚未完成，请先启动分析。</p>
+  <a class="btn-primary" href="{{ url_for('analyze_task', task_id=task['id']) }}">进入实时预览</a>
+</section>
+{% endif %}
+{% endblock %}

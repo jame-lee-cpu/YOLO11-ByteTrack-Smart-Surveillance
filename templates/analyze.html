@@ -1,0 +1,252 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h2>实时检测预览</h2>
+    <p class="hint">任务ID：{{ task['id'] }}，视频来源：{{ task['input_video']|video_source_label }}</p>
+  </div>
+  <a class="btn-secondary" href="{{ url_for('dashboard') }}">返回控制台</a>
+</section>
+
+<div class="page-grid">
+  <section class="card preview-card live-preview" id="preview-card">
+    <div class="preview-toolbar">
+      <h3>实时检测预览</h3>
+      <button class="btn-secondary btn-compact" type="button" id="toggle-preview-size">最大化</button>
+    </div>
+    <div class="video-box">
+      <img id="live-preview-img" class="selectable-preview" src="{{ url_for('video_feed', task_id=task['id']) }}" alt="实时预览">
+    </div>
+    <div class="analysis-progress" id="analysis-progress">
+      <div class="analysis-progress-row">
+        <span>检测进度</span>
+        <strong id="analysis-progress-text">
+          {% if task['status'] == 'done' %}100%{% elif task['status'] == 'running' %}计算中{% else %}等待开始{% endif %}
+        </strong>
+      </div>
+      <div class="analysis-progress-track" aria-hidden="true">
+        <div class="analysis-progress-fill{% if task['status'] == 'running' %} is-pending{% endif %}" id="analysis-progress-fill" style="width: {% if task['status'] == 'done' %}100{% else %}0{% endif %}%"></div>
+      </div>
+      <p class="hint progress-meta" id="analysis-progress-meta">
+        {% if task['status'] == 'running' %}正在读取视频帧。{% elif task['status'] == 'done' %}检测已完成。{% else %}开始分析后显示检测进度。{% endif %}
+      </p>
+    </div>
+    <p class="hint" id="live-status">
+      {% if task['status'] == 'done' %}
+        任务已完成，可查看结果视频与统计图。
+      {% elif task['status'] == 'failed' %}
+        任务失败：{{ task['error_message'] or '未知错误' }}
+      {% elif task['status'] == 'running' %}
+        任务处理中，页面每2秒自动检查状态。
+      {% else %}
+        任务等待中，点击开始分析后显示实时检测画面。
+      {% endif %}
+    </p>
+  </section>
+
+  <aside class="side-column">
+    <section class="card">
+      <h3>任务状态</h3>
+      <p>
+        当前任务状态：
+        {% if task['status'] == 'running' %}
+          <span class="badge badge-running">处理中</span>
+        {% elif task['status'] == 'done' %}
+          <span class="badge badge-done">已完成</span>
+        {% elif task['status'] == 'failed' %}
+          <span class="badge badge-failed">失败</span>
+        {% else %}
+          <span class="badge badge-uploaded">等待中</span>
+        {% endif %}
+      </p>
+      {% if task['status'] == 'failed' and task['error_message'] %}
+      <p class="err-text">失败原因：{{ task['error_message'] }}</p>
+      {% endif %}
+      {% if task['status'] == 'done' %}
+      <a class="btn-primary" href="{{ url_for('result', task_id=task['id']) }}">查看结果</a>
+      {% elif task['status'] != 'running' %}
+      <form method="post">
+        <button class="btn-primary" type="submit">开始分析</button>
+      </form>
+      {% endif %}
+    </section>
+
+    <section class="card runtime-controls">
+      <h3>运行时轨迹控制</h3>
+      <label for="runtime-trail-mode">轨迹模式</label>
+      <select id="runtime-trail-mode">
+        <option value="none" {% if task_config.trail_mode == 'none' %}selected{% endif %}>none</option>
+        <option value="all" {% if task_config.trail_mode == 'all' %}selected{% endif %}>all</option>
+        <option value="selected" {% if task_config.trail_mode == 'selected' %}selected{% endif %}>selected</option>
+      </select>
+      <label for="runtime-highlight-ids">高亮 track_id</label>
+      <input id="runtime-highlight-ids" type="text" value="{{ task_config.highlight_ids|join(',') }}" placeholder="12 或 12,15">
+      <label for="runtime-trail-len">轨迹长度</label>
+      <input id="runtime-trail-len" type="number" min="1" value="{{ task_config.trail_len }}">
+      <button class="btn-primary" type="button" id="apply-trail">应用轨迹设置</button>
+      <div class="button-grid two">
+        <button class="btn-secondary" type="button" id="pause-task">暂停分析</button>
+        <button class="btn-secondary" type="button" id="resume-task">继续分析</button>
+      </div>
+      <p class="hint" id="runtime-message">修改只影响后续帧，不回溯历史帧。</p>
+    </section>
+
+    <section class="card">
+      <h3>当前参数摘要</h3>
+      <dl class="kv-list">
+        <div><dt>模型</dt><dd>{{ task_config.model_path }}</dd></div>
+        <div><dt>置信度</dt><dd>{{ '%.2f'|format(task_config.conf or 0) }}</dd></div>
+        <div><dt>轨迹模式</dt><dd>{{ task_config.trail_mode }}</dd></div>
+        <div><dt>测速线距离</dt><dd>{{ '%.1f'|format(task_config.line_distance_m or 0) }} m</dd></div>
+      </dl>
+    </section>
+
+    <section class="card">
+      <h3>当前统计摘要</h3>
+      <div class="mini-stats">
+        <div><span>总车流量</span><strong id="live-flow-total">{{ task['flow_total'] }}</strong></div>
+        <div><span>平均估算车速</span><strong id="live-avg-speed">{{ '%.1f'|format(task['avg_speed_kmh'] or 0) }} km/h</strong></div>
+        <div><span>最高估算车速</span><strong id="live-max-speed">{{ '%.1f'|format(task['max_speed_kmh'] or 0) }} km/h</strong></div>
+        <div><span>已测速车辆数</span><strong id="live-measured-count">{{ task['measured_count'] }}</strong></div>
+      </div>
+    </section>
+
+    <section class="card" id="live-rear-end-card" hidden>
+      <h3>追尾风险报告</h3>
+      <div id="live-rear-end-list"></div>
+    </section>
+
+  </aside>
+</div>
+
+<script>
+  (function () {
+    const taskId = {{ task['id'] }};
+    const statusEl = document.getElementById('live-status');
+    const runtimeMsg = document.getElementById('runtime-message');
+    const previewCard = document.getElementById('preview-card');
+    const togglePreview = document.getElementById('toggle-preview-size');
+    const previewImg = document.getElementById('live-preview-img');
+    const rearEndCard = document.getElementById('live-rear-end-card');
+    const rearEndList = document.getElementById('live-rear-end-list');
+    const progressFill = document.getElementById('analysis-progress-fill');
+    const progressText = document.getElementById('analysis-progress-text');
+    const progressMeta = document.getElementById('analysis-progress-meta');
+
+    function updateStats(stats) {
+      if (!stats) return;
+      document.getElementById('live-flow-total').textContent = String(stats.flow_total || 0);
+      document.getElementById('live-avg-speed').textContent = `${Number(stats.avg_speed_kmh || 0).toFixed(1)} km/h`;
+      document.getElementById('live-max-speed').textContent = `${Number(stats.max_speed_kmh || 0).toFixed(1)} km/h`;
+      document.getElementById('live-measured-count').textContent = String(stats.measured_count || 0);
+    }
+
+    function formatTime(seconds) {
+      const total = Math.max(0, Math.floor(Number(seconds || 0)));
+      const mm = String(Math.floor(total / 60)).padStart(2, '0');
+      const ss = String(total % 60).padStart(2, '0');
+      return `${mm}:${ss}`;
+    }
+
+    function updateProgress(stats, status) {
+      if (!progressFill || !progressText || !progressMeta) return;
+      const duration = Number(stats && stats.source_duration_sec ? stats.source_duration_sec : 0);
+      const timestamp = Number(stats && stats.timestamp ? stats.timestamp : 0);
+      const rawPercent = stats && stats.progress_percent !== null && stats.progress_percent !== undefined
+        ? Number(stats.progress_percent)
+        : null;
+
+      if (status === 'done') {
+        progressFill.classList.remove('is-pending');
+        progressFill.style.width = '100%';
+        progressText.textContent = '100%';
+        progressMeta.textContent = '检测已完成。';
+        return;
+      }
+      if (status === 'failed') {
+        progressFill.classList.remove('is-pending');
+        progressText.textContent = '失败';
+        progressMeta.textContent = '检测任务已失败。';
+        return;
+      }
+      if (rawPercent !== null && Number.isFinite(rawPercent) && rawPercent > 0) {
+        const percent = Math.max(0, Math.min(99.9, rawPercent));
+        progressFill.classList.remove('is-pending');
+        progressFill.style.width = `${percent.toFixed(1)}%`;
+        progressText.textContent = `${percent.toFixed(1)}%`;
+        progressMeta.textContent = duration > 0
+          ? `${formatTime(timestamp)} / ${formatTime(duration)}`
+          : `已处理到 ${formatTime(timestamp)}`;
+      } else if (status === 'running') {
+        progressFill.classList.add('is-pending');
+        progressFill.style.width = '35%';
+        progressText.textContent = '计算中';
+        progressMeta.textContent = timestamp > 0 ? `已处理到 ${formatTime(timestamp)}` : '正在读取视频帧。';
+      }
+    }
+
+    function esc(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (ch) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+    }
+
+    function renderRearEndReviews(items, qwenActive = false) {
+      if (!rearEndCard || !rearEndList || !items || !items.length) return;
+      rearEndCard.hidden = false;
+      rearEndList.innerHTML = items.map((item) => {
+        const result = qwenActive ? String(item.qwen_result || '').toLowerCase() : '';
+        const hasError = qwenActive && Boolean(item.qwen_error);
+        const prefix = result === 'true'
+          ? '千问复核为 true'
+          : (result === 'false' ? '千问复核为 false' : (hasError ? '千问复核未完成' : '规则检测到疑似追尾风险'));
+        const title = `${prefix}：frame ${esc(item.frame_id || '')}，${Number(item.timestamp || 0).toFixed(2)}s，track ${esc(item.track_id || '')} / ${esc(item.related_track_id || '')}`;
+        const reason = esc(qwenActive
+          ? (item.qwen_reason || item.qwen_error || item.description || '')
+          : (item.description || item.qwen_reason || ''));
+        const snapshots = (item.downloads || []).map((file) => (
+          `<figure class="snapshot-item"><a href="${esc(file.url)}" target="_blank" rel="noopener"><img src="${esc(file.url)}" alt="${esc(file.label || '追尾风险截图')}"></a><figcaption>${esc(file.label || '')}${file.timestamp !== null && file.timestamp !== undefined ? `，${Number(file.timestamp).toFixed(2)}s` : ''}</figcaption></figure>`
+        )).join('');
+        return `<div class="alert-block"><p class="err-text">${title}</p><p class="hint">${reason}</p>${snapshots ? `<div class="snapshot-grid">${snapshots}</div>` : ''}</div>`;
+      }).join('');
+    }
+
+    PreviewSelection.bind(taskId, previewImg, runtimeMsg);
+    document.getElementById('apply-trail').addEventListener('click', () => TrailControl.apply(taskId, runtimeMsg));
+    document.getElementById('pause-task').addEventListener('click', () => TrailControl.pause(taskId, runtimeMsg, statusEl));
+    document.getElementById('resume-task').addEventListener('click', () => TrailControl.resume(taskId, runtimeMsg, statusEl));
+    togglePreview.addEventListener('click', () => UI.toggleMaximize(previewCard, togglePreview));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && previewCard.classList.contains('is-maximized')) {
+        previewCard.classList.remove('is-maximized');
+        togglePreview.textContent = '最大化';
+      }
+    });
+
+    {% if task['status'] == 'running' %}
+    const timer = setInterval(async () => {
+      try {
+        const data = await API.get(`/task_status/${taskId}`);
+        if (!data.ok) return;
+        if (data.paused) {
+          statusEl.textContent = '任务已暂停，点击继续分析后恢复处理。';
+        } else if (data.status === 'running') {
+          statusEl.textContent = '任务处理中，页面每2秒自动检查状态。';
+        }
+        updateStats(data.stats);
+        updateProgress(data.stats, data.status);
+        renderRearEndReviews(data.rear_end_reviews, Boolean(data.qwen_active));
+        if (data.status === 'done') {
+          statusEl.textContent = '任务已完成，可查看结果视频与统计图。';
+          updateProgress(data.stats, 'done');
+          clearInterval(timer);
+          window.location.href = data.result_url;
+        } else if (data.status === 'failed') {
+          statusEl.textContent = `任务失败：${data.error_message || '未知错误'}`;
+          updateProgress(data.stats, 'failed');
+          clearInterval(timer);
+        }
+      } catch (_) {}
+    }, 2000);
+    {% endif %}
+  })();
+</script>
+{% endblock %}

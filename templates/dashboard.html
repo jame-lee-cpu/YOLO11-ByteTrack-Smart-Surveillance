@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card dashboard-head">
+  <div>
+    <h2>控制台</h2>
+    <p>当前用户：<strong>{{ username }}</strong>　用户角色：<strong>{{ role }}</strong></p>
+  </div>
+  <div class="actions-inline">
+    <a class="btn-primary" href="{{ url_for('upload_video') }}">上传新视频</a>
+    <a class="btn-secondary" href="{{ url_for('logout') }}">退出登录</a>
+  </div>
+</section>
+
+<section class="card">
+  <h3>任务列表</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>任务ID</th>
+          <th>视频来源</th>
+          <th>创建时间</th>
+          <th>状态</th>
+          <th>总车流量</th>
+          <th>平均估算车速</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tasks %}
+        <tr>
+          <td>{{ t['id'] }}</td>
+          <td>{{ t['input_video']|video_source_label }}</td>
+          <td>{{ t['created_at'] }}</td>
+          <td>
+            {% if t['status'] == 'running' %}
+              <span class="badge badge-running">处理中</span>
+            {% elif t['status'] == 'done' %}
+              <span class="badge badge-done">已完成</span>
+            {% elif t['status'] == 'failed' %}
+              <span class="badge badge-failed">失败</span>
+            {% else %}
+              <span class="badge badge-uploaded">待分析</span>
+            {% endif %}
+          </td>
+          <td>{{ t['flow_total'] }}</td>
+          <td>{{ '%.1f'|format(t['avg_speed_kmh'] or 0) }} km/h</td>
+          <td class="actions-cell">
+            <a class="btn-sm" href="{{ url_for('config_lines', task_id=t['id']) }}">配置线条</a>
+            <a class="btn-sm" href="{{ url_for('analyze_task', task_id=t['id']) }}">实时预览</a>
+            <a class="btn-sm" href="{{ url_for('result', task_id=t['id']) }}">查看结果</a>
+            <form
+              class="inline-form"
+              method="post"
+              action="{{ url_for('delete_task_record', task_id=t['id']) }}"
+              onsubmit="return confirm('{{ '该任务正在处理中，确认取消后台分析并删除网页记录？' if t['status'] == 'running' else '确认删除该任务记录？此操作只删除网页记录，不删除视频和结果文件。' }}');"
+            >
+              <button class="btn-sm btn-danger" type="submit">{{ '取消并删除' if t['status'] == 'running' else '删除记录' }}</button>
+            </form>
+          </td>
+        </tr>
+        {% if t['status'] == 'failed' and t['error_message'] %}
+        <tr>
+          <td colspan="7" class="err-text">失败原因：{{ t['error_message'] }}</td>
+        </tr>
+        {% endif %}
+        {% else %}
+        <tr><td colspan="7">暂无任务，请先上传视频。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

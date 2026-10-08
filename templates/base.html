@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title or '智能监控系统' }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container row-between">
+      <a class="brand" href="{{ url_for('dashboard') if session.get('user_id') else url_for('login') }}">
+        <span class="brand-mark">🚗</span>
+        <span>
+          <strong>智能监控系统</strong>
+          <em>YOLO11 + ByteTrack</em>
+        </span>
+      </a>
+      <nav>
+        {% if session.get('user_id') %}
+        <a href="{{ url_for('dashboard') }}">控制台</a>
+        <a href="{{ url_for('upload_video') }}">上传视频</a>
+        <a href="{{ url_for('logout') }}">退出登录</a>
+        {% endif %}
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="msg msg-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    <script src="{{ url_for('static', filename='common.js') }}"></script>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

@@ -1,0 +1,332 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h2>可视化测速线配置</h2>
+    <p class="hint">任务ID：{{ task['id'] }}，原始视频尺寸：{{ video_width }} × {{ video_height }}</p>
+  </div>
+  <a class="btn-secondary" href="{{ url_for('dashboard') }}">返回控制台</a>
+</section>
+
+<div class="line-config-layout">
+  <section class="card">
+    <h3>视频首帧预览</h3>
+    <div class="line-preview-wrap" id="preview-wrap">
+      <img id="preview-image" src="{{ preview_url }}" alt="视频首帧">
+      <canvas id="line-canvas"></canvas>
+    </div>
+    <div class="line-legend">
+      <span><i class="legend-count"></i>统计线</span>
+      <span><i class="legend-speed1"></i>测速线1</span>
+      <span><i class="legend-speed2"></i>测速线2</span>
+    </div>
+    <details class="debug-lines">
+      <summary>调试信息</summary>
+      <pre id="debug-output"></pre>
+    </details>
+  </section>
+
+  <aside class="side-column">
+    <section class="card">
+      <h3>当前编辑线</h3>
+      <label for="active-line">选择线条</label>
+      <select id="active-line">
+        <option value="count_line">统计线</option>
+        <option value="speed_line_1">测速线1</option>
+        <option value="speed_line_2">测速线2</option>
+      </select>
+      <p class="current-line-tag" id="current-line-tag">正在编辑：统计线</p>
+    </section>
+
+    <section class="card">
+      <h3>快捷调整</h3>
+      <div class="control-group">
+        <strong>线条移动</strong>
+        <div class="button-grid four">
+          <button type="button" data-action="move" data-dx="0" data-dy="-10">上移</button>
+          <button type="button" data-action="move" data-dx="0" data-dy="10">下移</button>
+          <button type="button" data-action="move" data-dx="-10" data-dy="0">左移</button>
+          <button type="button" data-action="move" data-dx="10" data-dy="0">右移</button>
+        </div>
+      </div>
+      <div class="control-group">
+        <strong>线条旋转</strong>
+        <div class="button-grid two">
+          <button type="button" data-action="rotate" data-da="-5">左旋</button>
+          <button type="button" data-action="rotate" data-da="5">右旋</button>
+        </div>
+      </div>
+      <div class="control-group">
+        <strong>线条长度</strong>
+        <div class="button-grid three">
+          <button type="button" data-action="length" data-dl="30">加长</button>
+          <button type="button" data-action="length" data-dl="-30">缩短</button>
+          <button type="button" id="reset-line">重置当前线</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>滑块控制</h3>
+      <label for="line-x">X位置</label>
+      <input id="line-x" type="range" min="0" max="100" value="50">
+      <label for="line-y">Y位置</label>
+      <input id="line-y" type="range" min="0" max="100" value="50">
+      <label for="line-length">线条长度</label>
+      <input id="line-length" type="range" min="20" max="100" value="50">
+      <label for="line-angle">旋转角度</label>
+      <input id="line-angle" type="range" min="-180" max="180" value="0">
+    </section>
+
+    <section class="card">
+      <h3>估算测速参数</h3>
+      <label for="line-distance">两条测速线实际距离 LINE_DISTANCE_M（米）</label>
+      <input id="line-distance" type="number" min="0.01" step="0.1" value="{{ task_config.line_distance_m }}">
+      <label for="direction-mode">方向模式 SPEED_DIRECTION_MODE</label>
+      <select id="direction-mode">
+        <option value="vertical" {% if task_config.speed_direction_mode == 'vertical' %}selected{% endif %}>vertical：上下方向</option>
+        <option value="horizontal" {% if task_config.speed_direction_mode == 'horizontal' %}selected{% endif %}>horizontal：左右方向</option>
+      </select>
+      <label for="cross-tolerance">穿线容差 CROSS_TOLERANCE</label>
+      <input id="cross-tolerance" type="number" min="0" value="{{ task_config.cross_tolerance }}">
+    </section>
+
+    <section class="card">
+      <h3>轨迹控制参数</h3>
+      <label for="trail-mode">TRAIL_MODE</label>
+      <select id="trail-mode">
+        <option value="none" {% if task_config.trail_mode == 'none' %}selected{% endif %}>none</option>
+        <option value="all" {% if task_config.trail_mode == 'all' %}selected{% endif %}>all</option>
+        <option value="selected" {% if task_config.trail_mode == 'selected' %}selected{% endif %}>selected</option>
+      </select>
+      <label for="highlight-ids">HIGHLIGHT_IDS</label>
+      <input id="highlight-ids" type="text" value="{{ task_config.highlight_ids|join(',') }}" placeholder="12 或 12,15">
+      <label for="trail-len">TRAIL_LEN</label>
+      <input id="trail-len" type="number" min="1" value="{{ task_config.trail_len }}">
+    </section>
+
+    <section class="card">
+      <h3>千问AI复核</h3>
+      <label class="check-row">
+        <input id="qwen-review-enabled" type="checkbox" {% if task_config.qwen_review_enabled %}checked{% endif %}>
+        <span>开启千问AI追尾复核</span>
+      </label>
+      <label for="qwen-api-key">千问 API Key</label>
+      <input id="qwen-api-key" type="password" autocomplete="off" placeholder="不启用复核可留空" value="{{ task_config.qwen_api_key }}">
+      <p class="hint">关闭时不消耗额度；开启后，疑似追尾事件会发送完整标注截图给千问复核。</p>
+    </section>
+
+    <section class="card action-card">
+      <h3>配置保存与开始分析</h3>
+      <button class="btn-secondary" type="button" id="use-defaults">使用默认配置</button>
+      <button class="btn-primary" type="button" id="save-config">保存配置</button>
+      <button class="btn-primary" type="button" id="start-analysis">开始分析</button>
+      <p class="hint" id="config-message">调整完成后先保存配置，或直接点击开始分析自动保存。</p>
+    </section>
+  </aside>
+</div>
+
+<script>
+  (function () {
+    const taskId = {{ task['id'] }};
+    const videoWidth = {{ video_width }};
+    const videoHeight = {{ video_height }};
+    const savedConfig = {{ task_config|tojson }};
+    const defaultConfig = {{ default_config|tojson }};
+    const labels = { count_line: '统计线', speed_line_1: '测速线1', speed_line_2: '测速线2' };
+    const colors = { count_line: '#f59e0b', speed_line_1: '#16a34a', speed_line_2: '#dc2626' };
+
+    const els = {
+      image: document.getElementById('preview-image'),
+      canvas: document.getElementById('line-canvas'),
+      ctx: document.getElementById('line-canvas')?.getContext('2d'),
+      activeSelect: document.getElementById('active-line'),
+      currentTag: document.getElementById('current-line-tag'),
+      xSlider: document.getElementById('line-x'),
+      ySlider: document.getElementById('line-y'),
+      lengthSlider: document.getElementById('line-length'),
+      angleSlider: document.getElementById('line-angle'),
+      message: document.getElementById('config-message'),
+      debugOutput: document.getElementById('debug-output')
+    };
+
+    if (!els.ctx || !els.image || !els.canvas) {
+      console.error('Required canvas elements not found');
+      return;
+    }
+
+    let displayWidth = 0, displayHeight = 0, lines = {}, defaultLines = {};
+
+    function resizeCanvas() {
+      const hasLines = Object.keys(lines).length > 0 && displayWidth > 0;
+      const currentSource = hasLines ? buildPayload() : savedConfig;
+      const rect = els.image.getBoundingClientRect();
+      displayWidth = Math.max(1, Math.round(rect.width));
+      displayHeight = Math.max(1, Math.round(rect.height));
+      els.canvas.width = displayWidth;
+      els.canvas.height = displayHeight;
+      els.canvas.style.width = `${displayWidth}px`;
+      els.canvas.style.height = `${displayHeight}px`;
+      initializeLines(currentSource, true);
+      draw();
+    }
+
+    function initializeLines(source, force) {
+      if (!force && Object.keys(lines).length) return;
+      ['count_line', 'speed_line_1', 'speed_line_2'].forEach(key => {
+        lines[key] = LineEditor.scale(source[key], videoWidth, videoHeight, displayWidth, displayHeight);
+        defaultLines[key] = LineEditor.scale(defaultConfig[key], videoWidth, videoHeight, displayWidth, displayHeight);
+      });
+      syncSliders();
+    }
+
+    function draw() {
+      els.ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
+      Object.keys(lines).forEach(key => {
+        const line = lines[key];
+        const p = LineEditor.editableToXyxy(line);
+        els.ctx.save();
+        els.ctx.strokeStyle = colors[key];
+        els.ctx.lineWidth = key === els.activeSelect.value ? 4 : 3;
+        els.ctx.beginPath();
+        els.ctx.moveTo(p.x1, p.y1);
+        els.ctx.lineTo(p.x2, p.y2);
+        els.ctx.stroke();
+        els.ctx.fillStyle = colors[key];
+        els.ctx.font = '16px Microsoft YaHei, sans-serif';
+        els.ctx.fillText(labels[key], line.center_x + 8, line.center_y - 8);
+        els.ctx.restore();
+      });
+      if (els.debugOutput) els.debugOutput.textContent = JSON.stringify(buildPayload(), null, 2);
+    }
+
+    function syncSliders() {
+      const line = lines[els.activeSelect.value];
+      if (!line) return;
+      if (els.currentTag) els.currentTag.textContent = `正在编辑：${labels[els.activeSelect.value]}`;
+      if (els.xSlider) { els.xSlider.max = String(displayWidth); els.xSlider.value = Math.round(line.center_x); }
+      if (els.ySlider) { els.ySlider.max = String(displayHeight); els.ySlider.value = Math.round(line.center_y); }
+      if (els.lengthSlider) { els.lengthSlider.max = String(Math.round(Math.max(displayWidth, displayHeight) * 1.5)); els.lengthSlider.value = Math.round(line.length); }
+      if (els.angleSlider) els.angleSlider.value = Math.round(line.angle);
+    }
+
+    function updateFromSliders() {
+      const line = lines[els.activeSelect.value];
+      if (!line) return;
+      line.center_x = Number(els.xSlider.value);
+      line.center_y = Number(els.ySlider.value);
+      line.length = Number(els.lengthSlider.value);
+      line.angle = Number(els.angleSlider.value);
+      LineEditor.clamp(line, displayWidth, displayHeight);
+      draw();
+    }
+
+    function buildPayload() {
+      const result = {};
+      ['count_line', 'speed_line_1', 'speed_line_2'].forEach(key => {
+        const xyxy = LineEditor.editableToXyxy(lines[key]);
+        result[key] = {
+          x1: Math.round(xyxy.x1 * videoWidth / displayWidth),
+          y1: Math.round(xyxy.y1 * videoHeight / displayHeight),
+          x2: Math.round(xyxy.x2 * videoWidth / displayWidth),
+          y2: Math.round(xyxy.y2 * videoHeight / displayHeight)
+        };
+      });
+      result.line_distance_m = Number(document.getElementById('line-distance')?.value) || defaultConfig.line_distance_m;
+      result.speed_direction_mode = document.getElementById('direction-mode')?.value || defaultConfig.speed_direction_mode;
+      result.cross_tolerance = Number(document.getElementById('cross-tolerance')?.value) || defaultConfig.cross_tolerance;
+      result.trail_mode = document.getElementById('trail-mode')?.value || defaultConfig.trail_mode;
+      result.highlight_ids = TrailControl.parseIds(document.getElementById('highlight-ids')?.value);
+      result.trail_len = Number(document.getElementById('trail-len')?.value) || defaultConfig.trail_len;
+      result.qwen_review_enabled = Boolean(document.getElementById('qwen-review-enabled')?.checked);
+      result.qwen_api_key = document.getElementById('qwen-api-key')?.value || '';
+      return result;
+    }
+
+    async function saveConfig() {
+      const data = await API.post(`/tasks/${taskId}/config-lines`, buildPayload());
+      UI.showMessage(els.message, data.message || '配置已保存', !data.ok);
+      if (!data.ok) throw new Error(data.message || '保存失败');
+      return data;
+    }
+
+    document.querySelectorAll('[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const line = lines[els.activeSelect.value];
+        if (!line) return;
+        if (btn.dataset.action === 'move') {
+          line.center_x += Number(btn.dataset.dx || 0);
+          line.center_y += Number(btn.dataset.dy || 0);
+        } else if (btn.dataset.action === 'rotate') {
+          line.angle += Number(btn.dataset.da || 0);
+        } else if (btn.dataset.action === 'length') {
+          line.length += Number(btn.dataset.dl || 0);
+        }
+        LineEditor.clamp(line, displayWidth, displayHeight);
+        syncSliders();
+        draw();
+      });
+    });
+
+    const resetBtn = document.getElementById('reset-line');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        lines[els.activeSelect.value] = Object.assign({}, defaultLines[els.activeSelect.value]);
+        syncSliders();
+        draw();
+      });
+    }
+
+    const defaultsBtn = document.getElementById('use-defaults');
+    if (defaultsBtn) {
+      defaultsBtn.addEventListener('click', () => {
+        Object.keys(defaultLines).forEach(key => lines[key] = Object.assign({}, defaultLines[key]));
+        const distEl = document.getElementById('line-distance');
+        const dirEl = document.getElementById('direction-mode');
+        const tolEl = document.getElementById('cross-tolerance');
+        const trailEl = document.getElementById('trail-mode');
+        const idsEl = document.getElementById('highlight-ids');
+        const lenEl = document.getElementById('trail-len');
+        const qwenEnabledEl = document.getElementById('qwen-review-enabled');
+        const qwenKeyEl = document.getElementById('qwen-api-key');
+        if (distEl) distEl.value = defaultConfig.line_distance_m;
+        if (dirEl) dirEl.value = defaultConfig.speed_direction_mode;
+        if (tolEl) tolEl.value = defaultConfig.cross_tolerance;
+        if (trailEl) trailEl.value = defaultConfig.trail_mode;
+        if (idsEl) idsEl.value = '';
+        if (lenEl) lenEl.value = defaultConfig.trail_len;
+        if (qwenEnabledEl) qwenEnabledEl.checked = Boolean(defaultConfig.qwen_review_enabled);
+        if (qwenKeyEl) qwenKeyEl.value = defaultConfig.qwen_api_key || '';
+        syncSliders();
+        draw();
+        if (els.message) els.message.textContent = '已恢复默认配置。';
+      });
+    }
+
+    const saveBtn = document.getElementById('save-config');
+    if (saveBtn) saveBtn.addEventListener('click', () => saveConfig().catch(() => {}));
+
+    const startBtn = document.getElementById('start-analysis');
+    if (startBtn) {
+      startBtn.addEventListener('click', async () => {
+        try {
+          await saveConfig();
+          const data = await API.post(`/tasks/${taskId}/start`);
+          if (els.message) els.message.textContent = data.message || '任务已启动';
+          if (data.redirect_url) window.location.href = data.redirect_url;
+        } catch (err) {
+          UI.showMessage(els.message, err.message || '启动失败', true);
+        }
+      });
+    }
+
+    [els.xSlider, els.ySlider, els.lengthSlider, els.angleSlider].forEach(s => {
+      if (s) s.addEventListener('input', updateFromSliders);
+    });
+    if (els.activeSelect) els.activeSelect.addEventListener('change', () => { syncSliders(); draw(); });
+    window.addEventListener('resize', () => { if (els.image.complete) resizeCanvas(); });
+    els.image.addEventListener('load', resizeCanvas);
+    if (els.image.complete) resizeCanvas();
+  })();
+</script>
+{% endblock %}

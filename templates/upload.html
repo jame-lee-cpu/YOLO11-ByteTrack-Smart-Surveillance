@@ -1,0 +1,106 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h2>选择视频来源</h2>
+    <p class="hint">支持本地视频上传，也支持 HTTP-FLV / RTMP-FLV 流地址。系统会提取首帧用于配置统计线和测速线。</p>
+  </div>
+  <a class="btn-secondary" href="{{ url_for('dashboard') }}">返回控制台</a>
+</section>
+
+<form method="post" enctype="multipart/form-data" class="form page-grid upload-form" id="upload-form">
+  <div class="main-column">
+    <section class="card">
+      <h3>视频来源</h3>
+      <div class="source-switch">
+        <label><input type="radio" name="source_type" value="file" checked> 本地视频文件</label>
+        <label><input type="radio" name="source_type" value="flv_stream"> FLV 流地址</label>
+      </div>
+
+      <div id="file-source-panel">
+        <label for="video">选择视频文件</label>
+        <input id="video" name="video" type="file" accept=".mp4,.avi,.mov,.flv,video/*" required>
+        <p class="hint">支持格式：mp4 / avi / mov / flv。上传后进入首帧调线页面。</p>
+      </div>
+
+      <div id="stream-source-panel" hidden>
+        <label for="stream-url">FLV 流地址</label>
+        <input id="stream-url" name="stream_url" type="url" placeholder="http://127.0.0.1:8080/live/test.flv 或 rtmp://...">
+        <p class="hint">HTTP/HTTPS 地址需以 .flv 结尾；RTMP 地址可直接填写。流必须能被当前 OpenCV/FFmpeg 环境访问。</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>基础分析参数</h3>
+      <div class="form-grid two">
+        <div>
+          <label for="model_path">模型选择</label>
+          <select id="model_path" name="model_path">
+            <option value="yolo11n.pt" {% if defaults.model_path == 'yolo11n.pt' %}selected{% endif %}>yolo11n.pt（快速测试）</option>
+            <option value="yolo11x.pt" {% if defaults.model_path == 'yolo11x.pt' %}selected{% endif %}>yolo11x.pt</option>
+          </select>
+        </div>
+        <div>
+          <label for="conf">置信度阈值 conf</label>
+          <input id="conf" name="conf" type="number" step="0.01" min="0" max="1" value="{{ defaults.conf }}">
+        </div>
+        <div>
+          <label for="imgsz">输入尺寸 imgsz</label>
+          <input id="imgsz" name="imgsz" type="number" min="32" value="{{ defaults.imgsz }}">
+        </div>
+        <div>
+          <label>检测类别</label>
+          <input type="text" value="行人 + 车辆" disabled>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>千问AI复核</h3>
+      <label class="check-row">
+        <input id="qwen-review-enabled" name="qwen_review_enabled" type="checkbox" value="1" {% if defaults.qwen_review_enabled %}checked{% endif %}>
+        <span>开启千问AI追尾复核</span>
+      </label>
+      <label for="qwen-api-key">千问 API Key</label>
+      <input id="qwen-api-key" name="qwen_api_key" type="password" autocomplete="off" placeholder="不启用复核可留空" value="{{ defaults.qwen_api_key }}">
+      <p class="hint">开启后，系统会在规则检测到疑似追尾时把完整标注截图发送给千问复核；关闭时只显示规则检测结果。</p>
+    </section>
+  </div>
+
+  <aside class="side-column">
+    <section class="card action-card">
+      <h3>下一步</h3>
+      <button class="btn-primary" type="submit">保存来源并配置测速线</button>
+      <p class="hint" id="upload-hint">提交后会尝试读取视频首帧，流地址不可用时会显示占位预览。</p>
+    </section>
+  </aside>
+</form>
+
+<script>
+  (function () {
+    const form = document.getElementById('upload-form');
+    const hint = document.getElementById('upload-hint');
+    const filePanel = document.getElementById('file-source-panel');
+    const streamPanel = document.getElementById('stream-source-panel');
+    const fileInput = document.getElementById('video');
+    const streamInput = document.getElementById('stream-url');
+    const sourceRadios = document.querySelectorAll('input[name="source_type"]');
+    function syncSourcePanel() {
+      const sourceType = document.querySelector('input[name="source_type"]:checked').value;
+      const useStream = sourceType === 'flv_stream';
+      filePanel.hidden = useStream;
+      streamPanel.hidden = !useStream;
+      fileInput.required = !useStream;
+      streamInput.required = useStream;
+    }
+    sourceRadios.forEach((item) => item.addEventListener('change', syncSourcePanel));
+    syncSourcePanel();
+    form.addEventListener('submit', function () {
+      const sourceType = document.querySelector('input[name="source_type"]:checked').value;
+      hint.textContent = sourceType === 'flv_stream'
+        ? '正在连接 FLV 流并提取首帧，请稍候...'
+        : '上传中并提取视频首帧，请稍候...';
+    });
+  })();
+</script>
+{% endblock %}

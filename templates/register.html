@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card narrow auth-card">
+  <h2>用户注册</h2>
+  <form method="post" class="form">
+    <label>用户名</label>
+    <input name="username" required>
+    <label>密码（至少6位）</label>
+    <input name="password" type="password" required>
+    <label>确认密码</label>
+    <input name="confirm_password" type="password" required>
+    <button type="submit">注册</button>
+  </form>
+  <p>已有账号？<a href="{{ url_for('login') }}">去登录</a></p>
+</section>
+{% endblock %}

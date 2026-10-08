@@ -1,0 +1,32 @@
+# Python 缓存、虚拟环境和本地临时文件
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.DS_Store
+
+# 本地数据、模型权重和运行产物
+data/
+checkpoints/
+web_data/
+output/
+output_reports/
+runs/
+anomaly_snapshots/
+qwen_snapshots/
+llm_payload.json
+trajectory_summary.json
+*.db
+*.sqlite
+*.sqlite3
+*.pt
+*.mp4
+*.avi
+*.mov
+*.csv
+
+# IDE 本地配置
+.vscode/
+
+# Thesis contains personal information and belongs in a private repository.
+docs/thesis.*
